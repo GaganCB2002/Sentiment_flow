@@ -6,88 +6,243 @@ A machine learning web application that classifies product/movie reviews into **
 
 ## Project Flow Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        SentimentFlow AI Pipeline                         │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    classDef input fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
+    classDef process fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+    classDef model fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#4a148c
+    classDef output fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#1b5e20
+    classDef data fill:#fce4ec,stroke:#880e4f,stroke-width:2px,color:#880e4f
+    classDef split fill:#fff8e1,stroke:#f57f17,stroke-width:2px,color:#f57f17
+    classDef ui fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#00695c
+    classDef epoch fill:#ede7f6,stroke:#4527a0,stroke-width:1px,color:#4527a0
 
-                         ┌─────────────────┐
-                         │  User Input      │
-                         │  (Review Text)   │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │  preprocess.py   │
-                         │  clean_text()    │
-                         │  - lowercase     │
-                         │  - remove punct  │
-                         │  - collapse ws   │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │  predict.py      │
-                         │  predict_        │
-                         │  sentiment()     │
-                         │  ┌───────────┐   │
-                         │  │ Tokenizer  │   │
-                         │  │ texts_to_  │   │
-                         │  │ sequences  │   │
-                         │  └─────┬─────┘   │
-                         │        │         │
-                         │  ┌─────▼─────┐   │
-                         │  │ pad_      │   │
-                         │  │ sequences  │   │
-                         │  │ (max_len=  │   │
-                         │  │  100)     │   │
-                         │  └─────┬─────┘   │
-                         │        │         │
-                         │  ┌─────▼─────┐   │
-                         │  │ rnn_      │   │
-                         │  │ model.h5  │   │
-                         │  │ predict() │   │
-                         │  └─────┬─────┘   │
-                         │        │         │
-                         │  ┌─────▼─────┐   │
-                         │  │ Label     │   │
-                         │  │ Encoder   │   │
-                         │  │ inverse_  │   │
-                         │  │ transform │   │
-                         │  └─────┬─────┘   │
-                         └────────┬────────┘
-                                  │
-                                  ▼
-               ┌─────────────────────────────────┐
-               │         app.py (Streamlit)       │
-               │  ┌──────────┐  ┌──────────────┐  │
-               │  │ Sentiment │  │ Confidence   │  │
-               │  │ 😊 Pos   │  │   99.99%     │  │
-               │  └──────────┘  │ ████████░░  │  │
-               │                └──────────────┘  │
-               └─────────────────────────────────┘
+    subgraph DATA_GEN["1. Data Generation - generate_dataset.py"]
+        direction TB
+        P_TEMPLATES["15 Positive Templates
+        'This product is amazing...'
+        'I absolutely love this...'
+        'Fantastic quality...'"]:::data
+        N_TEMPLATES["12 Negative Templates
+        'This is the worst product...'
+        'I absolutely hate this...'
+        'What a waste of money...'"]:::data
+        NEU_TEMPLATES["15 Neutral Templates
+        'The product arrived yesterday.'
+        'The product is fine.'
+        'This is an average product.'"]:::data
+        CONT["Continuation Phrases
+        40% chance to append
+        'The build quality is superb.'
+        'It stopped working...'"]:::process
+        END["Ending Phrases
+        30% chance to append
+        'Worth every penny.'
+        'I have no complaints.'"]:::process
+        P_TEMPLATES --> COMBINE
+        N_TEMPLATES --> COMBINE
+        NEU_TEMPLATES --> COMBINE
+        CONT --> COMBINE
+        END --> COMBINE
+        COMBINE["make_review()
+        Randomly combines:
+        starter + (cont?) + (end?)"]:::process
+        DUPES["50 duplicates each of:
+        3 sample reviews
+        5 key positive phrases"]:::data
+        COMBINE --> CSV
+        DUPES --> CSV
+        CSV[("dataset/sentiment_dataset.csv
+        ~3400 labeled reviews
+        Columns: text, sentiment")]:::data
+    end
 
+    subgraph TRAIN["2. Training Pipeline - train_model.py"]
+        direction TB
+        LOAD["Load CSV with Pandas"]:::process
+        CLEAN["Clean Text
+        clean_text()
+        - lowercase
+        - remove punctuation
+        - collapse whitespace"]:::process
+        TOKENIZE["Tokenize
+        Keras Tokenizer
+        num_words=10000
+        oov_token='&lt;OOV&gt;'
+        Each word → integer index"]:::process
+        PAD_SEQ["Pad Sequences
+        pad_sequences()
+        max_len=100
+        padding='post'
+        truncating='post'
+        Variable length → fixed 100"]:::process
+        ENCODE["Encode Labels
+        sklearn LabelEncoder
+        Positive → 0
+        Negative → 1
+        Neutral → 2"]:::process
+        SPLIT["Train / Test Split
+        train_test_split()
+        test_size=0.2 (20%)
+        random_state=42
+        stratify=labels
+        ─────────────────
+        Training Set: ~2720 reviews
+        Test Set: ~680 reviews"]:::split
+        CSV --> LOAD
+        LOAD --> CLEAN
+        CLEAN --> TOKENIZE
+        TOKENIZE --> PAD_SEQ
+        PAD_SEQ --> ENCODE
+        ENCODE --> SPLIT
+    end
 
-                    ┌──────────────────────────┐
-                    │    Training Pipeline      │
-                    └──────────────────────────┘
+    subgraph ARCH["3. Model Architecture - RNN"]
+        direction TB
+        EMB[("Embedding Layer
+        vocab_size × 100
+        Each word → 100-dim vector
+        Similar words → similar vectors")]:::model
+        RNN[("SimpleRNN Layer
+        128 units
+        Processes sequence step-by-step
+        Maintains hidden state
+        Final state = review encoding")]:::model
+        DENSE64[("Dense Layer
+        64 units, ReLU activation
+        Fully connected
+        Transforms 128 → 64 dim")]:::model
+        OUTPUT[("Output Layer
+        3 units, Softmax activation
+        Produces probability distribution
+        Positive | Negative | Neutral
+        Sum of probabilities = 1.0")]:::model
+        EMB --> RNN --> DENSE64 --> OUTPUT
+    end
 
-  generate_dataset.py      train_model.py
-  ┌─────────────────┐     ┌──────────────────────────┐
-  │ 15 positive      │     │  CSV ─► clean_text()     │
-  │ templates        │     │       ─► Tokenizer       │
-  │ 12 negative      │     │       ─► pad_sequences   │
-  │ 15 neutral       │     │       ─► LabelEncoder    │
-  │ + continuations  │     │       ─► train_test_split│
-  │ + endings        │     │       ─► Embedding       │
-  │ ───► CSV file    │     │       ─► SimpleRNN(128) │
-  └─────────────────┘     │       ─► Dense(64)       │
-                          │       ─► Dense(3)        │
-                          │       ─► ────────        │
-                          │       ─► rnn_model.h5    │
-                          │       ─► tokenizer.pkl   │
-                          │       ─► label_enc.pkl   │
-                          └──────────────────────────┘
+    subgraph LOOP["4. Training Loop - 50 Epochs"]
+        direction LR
+        E1["Epoch 1
+        Loss: ~1.10
+        Accuracy: ~55%"]:::epoch
+        E2["Epoch 5
+        Loss: ~0.30
+        Accuracy: ~90%"]:::epoch
+        E3["Epoch 10
+        Loss: ~0.05
+        Accuracy: ~99%"]:::epoch
+        E4["Epoch 25
+        Loss: ~0.001
+        Accuracy: 100%"]:::epoch
+        E5["Epoch 50
+        Loss: ~0.00003
+        Accuracy: 100%"]:::epoch
+        LR_CALLBACK["ReduceLROnPlateau
+        Monitors: val_loss
+        If no improvement for 5 epochs:
+        → factor=0.5 (halve LR)
+        → min_lr=0.0001
+        Helps model converge"]:::process
+        E1 --> E2 --> E3 --> E4 --> E5
+        E5 -.-> LR_CALLBACK
+        LR_CALLBACK -.-> |"Adjusts learning rate"| E5
+    end
+
+    subgraph SAVE["5. Save Artifacts"]
+        SAVE_MODEL[("model/rnn_model.h5
+        Trained Keras model
+        HDF5 format")]:::data
+        SAVE_TOK[("model/tokenizer.pkl
+        Fitted Tokenizer
+        Word → index mapping")]:::data
+        SAVE_ENC[("model/label_encoder.pkl
+        Fitted LabelEncoder
+        Label → integer mapping")]:::data
+    end
+
+    subgraph PREDICT["6. Prediction Pipeline - predict.py"]
+        direction TB
+        USER_INPUT["User Input
+        'Fantastic quality, very impressed!'"]:::input
+        CLEAN2["clean_text()
+        lowercase + remove punctuation"]:::process
+        TOK["tokenizer.texts_to_sequences()
+        ['fantastic','quality','very','impressed']
+        → [42, 156, 89, 231]"]:::process
+        PAD["pad_sequences()
+        [42, 156, 89, 231, 0, 0, 0, ...]
+        → length 100"]:::process
+        PRED["model.predict()
+        Input: padded sequence (100,)
+        Output: [0.99, 0.01, 0.00]
+        → argmax: class 0"]:::model
+        DECODE["label_encoder.inverse_transform([0])
+        → 'Positive'
+        confidence = 99.0%"]:::process
+        USER_INPUT --> CLEAN2
+        CLEAN2 --> TOK
+        TOK --> PAD
+        PAD --> PRED
+        PRED --> DECODE
+    end
+
+    subgraph UI["7. Streamlit UI - app.py"]
+        direction TB
+        TEXT_AREA["Text Area
+        User types or pastes review
+        Min 5 characters required"]:::ui
+        VALIDATE["Validate Input
+        - Not empty?
+        - At least 5 chars?"]:::ui
+        SAMPLE_BTNS["Sample Review Buttons
+        😊 Positive button
+        😐 Neutral button
+        😞 Negative button
+        One-click fills text area"]:::ui
+        PREDICT_BTN["🔮 Predict Button
+        Calls predict_sentiment()"]:::ui
+        CLEAR_BTN["🗑️ Clear Button
+        Resets text area"]:::ui
+        DISPLAY["Display Results
+        ┌──────────┐ ┌──────────────┐
+        │ Positive 😊 │ │   99.99%    │
+        │ Prediction│ │ ████████░░ │
+        └──────────┘ └──────────────┘"]:::output
+        TEXT_AREA --> VALIDATE
+        VALIDATE --> PREDICT_BTN
+        SAMPLE_BTNS --> TEXT_AREA
+        CLEAR_BTN --> TEXT_AREA
+        PREDICT_BTN --> DISPLAY
+    end
+
+    SPLIT --> EMB
+    OUTPUT --> LOOP
+    LOOP --> SAVE_MODEL
+    SAVE_TOK --> TOK
+    SAVE_ENC --> DECODE
+    SAVE_MODEL --> PRED
+    DECODE --> DISPLAY
+
+    subgraph EXAMPLES["8. Input / Output Examples"]
+        IO1["😊 Input: 'This product is amazing and I love it.'
+        Output: Positive (99.99%)
+        ← Contains strong positive words: amazing, love"]:::input
+        IO2["😐 Input: 'The product arrived yesterday.'
+        Output: Neutral (100.00%)
+        ← Factual statement, no opinion words"]:::input
+        IO3["😞 Input: 'This is the worst product I have ever used.'
+        Output: Negative (99.99%)
+        ← Contains strong negative words: worst"]:::input
+        IO4["😊 Input: 'Fantastic quality, very impressed!'
+        Output: Positive (100.00%)
+        ← Contains positive words: fantastic, impressed"]:::input
+        IO5["Input: 'It was okay I guess'
+        Output: Neutral (99.99%)
+        ← Ambiguous language, no strong signal"]:::input
+        IO6["Input: 'What a waste of money, do not buy.'
+        Output: Negative (99.99%)
+        ← Strong negative sentiment"]:::input
+    end
 ```
 
 ---
