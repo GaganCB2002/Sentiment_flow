@@ -247,6 +247,69 @@ flowchart TB
 
 ---
 
+## User Flow Diagram
+
+```mermaid
+flowchart LR
+    classDef userInput fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
+    classDef process fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+    classDef model fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#4a148c
+    classDef output fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#1b5e20
+
+    USER["🙋 User
+    Types or pastes a review
+    e.g. 'I love this phone'"]:::userInput
+
+    TEXT_AREA["📝 Text Area
+    Streamlit UI
+    Minimum 5 characters required"]:::process
+
+    VALIDATE{"✅ Input Valid?
+    - Not empty?
+    - At least 5 chars?"}:::process
+
+    CLEAN["🧹 Clean Text
+    - Lowercase
+    - Remove punctuation
+    - Collapse spaces"]:::process
+
+    TOKENIZE["🔢 Tokenize & Pad
+    Words → Numbers
+    Pad to 100 length"]:::process
+
+    PREDICT["🧠 RNN Model
+    Embedding → SimpleRNN
+    → Dense → Softmax"]:::model
+
+    RESULT["🎯 Result Displayed
+    ┌──────────────────┐
+    │  😊 Positive      │
+    │  Confidence: 99.99%│
+    │  ████████████░░  │
+    └──────────────────┘"]:::output
+
+    USER --> TEXT_AREA
+    TEXT_AREA --> VALIDATE
+    VALIDATE -->|"Yes"| CLEAN
+    VALIDATE -->|"No - Show Warning"| TEXT_AREA
+    CLEAN --> TOKENIZE
+    TOKENIZE --> PREDICT
+    PREDICT --> RESULT
+
+    SAMPLE["📋 Sample Buttons
+    😊 Positive
+    😐 Neutral
+    😞 Negative
+    One-click fill"]:::userInput
+    SAMPLE --> TEXT_AREA
+
+    CLEAR["🗑️ Clear Button
+    Resets text area"]:::process
+    CLEAR --> TEXT_AREA
+```
+
+---
+
 ## Tech Stack
 
 | Technology | Purpose |
